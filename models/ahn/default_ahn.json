@@ -1,0 +1,33 @@
+{
+    "data_dir": "datasets/Toys_and_Games_5/sentence_split/",
+    "dataset": "Toys_and_Games",
+    "log_dir": "logs",
+    "log": true,
+    "log_idx": 100,
+    "use_pretrain": true,
+    "pretrained_path": -1,
+    "model_name": "AHN",
+    "verbose": false,
+    "stats": false,
+    "stats_idx": 20,
+    "parallel": false,
+    "tensorboard": true,
+    "tensorboard_idx": 100,
+
+    "word_encoder": "lstm",
+
+    "hidden_dim": 300,
+    "embedding_dim": 300,
+    "dropout": 0.5,
+    "k_factor":10,
+    "num_head": 1,
+    "rnn_dropout": 0.0,
+    
+    "epochs": 64,
+    "batch_size": 32,
+    "lr": 0.0002,
+    "lr_decay": 0.5,
+    "decay_patience": 0,
+    "max_grad_norm": 5.0,
+    "patience": 5
+}

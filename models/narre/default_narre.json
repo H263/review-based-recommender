@@ -1,0 +1,31 @@
+{
+    "data_dir": "datasets/Toys_and_Games_5/review_split/review_split",
+    "dataset": "Toys_and_Games_tmp",
+    "log_dir": "logs",
+    "log": true,
+    "log_idx": 500,
+    "pretrained_path": -1,
+    "model_name": "NARRE",
+    "verbose": false,
+    "stats": false,
+    "stats_idx": 2,
+    "parallel": false,
+
+    "kernel_sizes":"3",
+    "hidden_dim": 100,
+    "embedding_dim": 300,
+    "att_dim": 32,
+    "latent_dim":32,
+    "dropout": 0.5,
+    "arch": "CNN",
+    "arch_coatten": "IDENTITY_SCALEDDOT_MEAN",
+    "use_pretrain": false,
+
+    "epochs": 64,
+    "batch_size": 50,
+    "lr": 0.002,
+    "lr_decay": 0.5,
+    "decay_patience": 0,
+    "max_grad_norm": 5.0,
+    "patience": 5
+}
