@@ -233,7 +233,7 @@ class Indexlizer():
         oov = {w:i for i, w in enumerate(self._vocab._oov)}
         sws = {w: i for i, w in enumerate(self._vocab._stop_words)}
         
-        for tokens in tqdm(list_of_tokens):
+        for tokens in list_of_tokens:
             token_ids = [] 
             for tok in tokens:
                 if tok in oov:

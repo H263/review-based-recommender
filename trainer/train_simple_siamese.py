@@ -18,7 +18,7 @@ from gensim.models import KeyedVectors
 
 from experiment import Experiment
 from utils import get_mask
-from data.divide_and_create_examples import clean_str
+from preprocess.divide_and_create_example_word import clean_str
 
 class MultipleOptimizer(object):
     def __init__(self, *op):
@@ -137,7 +137,7 @@ class NarreExperiment(Experiment):
         
     def build_model(self):
         # import different model 
-        from models.siamese.simple_siamese import SimpleSiamese
+        from models.simple_siamese.simple_siamese import SimpleSiamese
         # dirty implementation
         if self.args.use_pretrain:
             data_prefix = "/raid/hanszeng/Recommender/NARRE/data/"
@@ -201,63 +201,52 @@ class NarreExperiment(Experiment):
 
 
     def train_one_epoch(self, current_epoch):
-        avg_mse_loss = AvgMeters()
+        avg_loss = AvgMeters()
         square_error = 0.
         accum_count = 0
         start_time = time.time()
 
         self.model.train()
-        for i,  ((u_ids, i_ids, ratings), (u_revs, i_revs, u_rev_word_masks, i_rev_word_masks, u_rev_masks, i_rev_masks), (u_rids, i_rids), \
-                (_)) in enumerate(self.train_dataloader):
+        for i, (u_revs, i_revs, u_rev_word_masks, i_rev_word_masks, u_rev_masks, i_rev_masks, u_ids, i_ids, ratings) in enumerate(self.train_dataloader):
             if i == 0 and current_epoch == 0:
-                print("u_text", u_revs.shape, "i_text", i_revs.shape, "reuid", u_rids.shape, "reiid", i_rids.shape)
-            u_ids = u_ids.to(self.device)
-            i_ids = i_ids.to(self.device)
-            ratings = ratings.to(self.device)
+                print("u_revs", u_revs.shape, "i_revs", i_revs.shape)
             u_revs = u_revs.to(self.device)
             i_revs = i_revs.to(self.device)
             u_rev_word_masks = u_rev_word_masks.to(self.device)
             i_rev_word_masks = i_rev_word_masks.to(self.device)
             u_rev_masks = u_rev_masks.to(self.device)
             i_rev_masks = i_rev_masks.to(self.device)
+            u_ids = u_ids.to(self.device)
+            i_ids = i_ids.to(self.device)
+            ratings = ratings.to(self.device)
+
             self.optimizer.zero_grad()
             y_pred, _, _ = self.model(u_revs, i_revs, u_rev_word_masks, i_rev_word_masks, u_rev_masks, i_rev_masks, 
                                 u_ids, i_ids)
-
+            #y_pred = self.model(u_id, i_id)
             loss = self.loss_func(y_pred, ratings)
-            #loss_2 = self.bce_loss_func(gt_logits, ui_labels) + self.bce_loss_func(ng_logits, neg_ui_labels)
-            #loss = loss_1 + loss_2
             loss.backward()
 
             gnorm = nn.utils.clip_grad_norm_(self.model.parameters(), self.args.max_grad_norm)
             self.optimizer.step()
 
             # val 
-            avg_mse_loss.update(loss.mean().item())
+            avg_loss.update(loss.mean().item())
             square_error += loss.mean().item() * ratings.size(0)
             accum_count += ratings.size(0)
-
-            #avg_cls_loss.update(loss_2.mean().item())
 
             # log
             if (i+1) % self.args.log_idx == 0 and self.args.log:
                 elpased_time = (time.time() - start_time) / self.args.log_idx
                 rmse = math.sqrt(square_error / accum_count)
 
-                """
-                log_text = "epoch: {}/{}, step: {}/{}, loss mse: {:.3f}, loss cls: {:.3f}, rmse: {:.3f}, lr: {}, gnorm: {:3f}, time: {:.3f}".format(
-                    current_epoch, self.args.epochs,  (i+1), len(self.train_dataloader), avg_mse_loss.val, avg_cls_loss.val, rmse, 
-                    self.optimizer.param_groups[0]["lr"], gnorm, elpased_time
-                )
-                """
-                log_text = "epoch: {}/{}, step: {}/{}, loss mse: {:.3f}, rmse: {:.3f}, lr: {}, gnorm: {:3f}, time: {:.3f}".format(
-                    current_epoch, self.args.epochs,  (i+1), len(self.train_dataloader), avg_mse_loss.val, rmse, 
+                log_text = "epoch: {}/{}, step: {}/{}, loss: {:.3f}, rmse: {:.3f}, lr: {}, gnorm: {:3f}, time: {:.3f}".format(
+                    current_epoch, self.args.epochs,  (i+1), len(self.train_dataloader), avg_loss.val, rmse, 
                     self.optimizer.param_groups[0]["lr"], gnorm, elpased_time
                 )
                 self.print_write_to_log(log_text)
 
-                avg_mse_loss.reset()
-                #avg_cls_loss.reset()
+                avg_loss.reset()
                 square_error = 0. 
                 accum_count = 0
                 start_time = time.time()
@@ -268,17 +257,16 @@ class NarreExperiment(Experiment):
         avg_loss = AvgMeters()
 
         self.model.eval()
-        for i,  ((u_ids, i_ids, ratings), (u_revs, i_revs, u_rev_word_masks, i_rev_word_masks, u_rev_masks, i_rev_masks), \
-                 (u_rids, i_rids)) in enumerate(self.valid_dataloader):
-            u_ids = u_ids.to(self.device)
-            i_ids = i_ids.to(self.device)
-            ratings = ratings.to(self.device)
+        for i,  (u_revs, i_revs, u_rev_word_masks, i_rev_word_masks, u_rev_masks, i_rev_masks, u_ids, i_ids, ratings) in enumerate(self.valid_dataloader):
             u_revs = u_revs.to(self.device)
             i_revs = i_revs.to(self.device)
             u_rev_word_masks = u_rev_word_masks.to(self.device)
             i_rev_word_masks = i_rev_word_masks.to(self.device)
             u_rev_masks = u_rev_masks.to(self.device)
             i_rev_masks = i_rev_masks.to(self.device)
+            u_ids = u_ids.to(self.device)
+            i_ids = i_ids.to(self.device)
+            ratings = ratings.to(self.device)
 
             with torch.no_grad():
                 y_pred, _, _ = self.model(u_revs, i_revs, u_rev_word_masks, i_rev_word_masks, u_rev_masks, i_rev_masks, 
@@ -325,145 +313,6 @@ class NarreExperiment(Experiment):
         for epoch in range(self.args.epochs):
             self.valid_one_epoch()
             self.train_one_epoch(epoch)
-
-class SiameseDatasetNotBalance(torch.utils.data.Dataset):
-    def __init__(self, args, set_name, u_rv_num):
-        super(NarreDatasetSameUIReviewNum, self).__init__()
-
-        self.args = args
-        self.set_name = set_name
-        param_path = os.path.join(self.args.data_dir, "meta.pkl")
-        with open(param_path, "rb") as f:
-            para = pickle.load(f)
-
-        self.user_num = para['user_num']
-        self.item_num = para['item_num']
-        self.indexlizer = para['indexlizer']
-        self.rv_num = para["rv_num"]
-        self.rv_len = para["rv_len"]
-        self.u_text = para['user_reviews']
-        self.i_text = para['item_reviews']
-        self.u_rids = para["user_rids"]
-        self.i_rids = para["item_rids"]
-        self.word_vocab = self.indexlizer._vocab
-        
-        self.u_rv_num = u_rv_num
-        self.i_rv_num = self.rv_num
-        self.sample_train_review = self.args.sample_train_review
-        assert self.u_rv_num <= self.rv_num
-
-        example_path = os.path.join(self.args.data_dir, f"{set_name}_exmaples.pkl")
-        with open(example_path, "rb") as f:
-            self.examples = pickle.load(f)
-
-    def uniform_sample_reviews(self, revs, rv_num):
-        non_zero_indicies = np.nonzero(np.sum(revs, axis=1))[0]
-        np.random.shuffle(non_zero_indicies)
-
-        new_revs = []
-        for i, idx in enumerate(non_zero_indicies):
-            if i < rv_num:
-                new_revs.append(revs[idx])
-        
-        if len(new_revs) < rv_num:
-            new_revs += [[0] * self.rv_len]
-
-        return new_revs
-        
-
-    def __getitem__(self, i):
-        # for each review(u_text or i_text) [...] 
-        # NOTE: not padding 
-        if self.set_name == "train":
-            u_id, i_id, rating, u_revs, i_revs, u_rids, i_rids, _, _, ui_rev = self.examples[i]
-            print("org: ", u_revs[:4])
-            if self.sample_train_review:
-                u_revs = self.uniform_sample_reviews(u_revs, self.u_rv_num)
-            print("after: ", u_revs[:4])
-            
-            
-            neg_idx = random.randint(0, len(self.examples)-1) 
-            while self.examples[neg_idx][1] == i_id:
-                neg_idx = random.randint(0, len(self.examples)-1)
-            neg_ui_rev = self.examples[neg_idx][-1]
-
-
-            ui_label = 1. 
-            neg_ui_label = 0.
-
-            return u_id, i_id, rating, u_revs, i_revs, u_rids, i_rids, ui_rev, neg_ui_rev, ui_label, neg_ui_label      
-
-        else:
-            u_id, i_id, rating, u_revs, i_revs, u_rids, i_rids, _, _ = self.examples[i]
-            return u_id, i_id, rating, u_revs, i_revs, u_rids, i_rids
-        
-    def __len__(self):
-        return len(self.examples)
-
-    @staticmethod
-    def truncate_tokens(tokens, max_seq_len):
-        if len(tokens) > max_seq_len:
-            tokens = tokens[:max_seq_len]
-        return tokens
-
-    @staticmethod
-    def get_rev_mask(inputs):
-        """
-        If rv_len are all 0, then corresponding position in rv_num should be 0
-        Args:
-            inputs: [bz, rv_num, rv_len]
-        """
-        bz, rv_num, _ = list(inputs.size())
-
-        masks = torch.ones(size=(bz, rv_num)).int()
-        inputs = inputs.sum(dim=-1) #[bz, rv_num]
-        masks[inputs==0] = 0 
-
-        return masks.bool()
-
-    def train_collate_fn(self, batch):
-        u_ids, i_ids, ratings, u_revs, i_revs, u_rids, i_rids, ui_revs, neg_ui_revs, ui_labels, neg_ui_labels = zip(*batch)
-        u_ids = LongTensor(u_ids)
-        i_ids = LongTensor(i_ids)
-        ratings = FloatTensor(ratings)
-        u_revs = LongTensor(u_revs)
-        i_revs = LongTensor(i_revs)
-        u_rids = LongTensor(u_rids)
-        i_rids = LongTensor(i_rids)
-        ui_revs = LongTensor(ui_revs) 
-        neg_ui_revs = LongTensor(neg_ui_revs)
-        ui_labels = FloatTensor(ui_labels)
-        neg_ui_labels = FloatTensor(neg_ui_labels)
-
-        u_rev_word_masks = get_mask(u_revs)
-        i_rev_word_masks = get_mask(i_revs)
-        ui_word_masks = get_mask(ui_revs)
-        neg_ui_word_masks = get_mask(neg_ui_revs)
-        u_rev_masks = self.get_rev_mask(u_revs)
-        i_rev_masks = self.get_rev_mask(i_revs)
-
-        return (u_ids, i_ids, ratings), (u_revs, i_revs, u_rev_word_masks, i_rev_word_masks, u_rev_masks, i_rev_masks), (u_rids, i_rids), \
-                (ui_revs, neg_ui_revs, ui_word_masks, neg_ui_word_masks,  ui_labels, neg_ui_labels)
-
-    def test_collate_fn(self, batch):
-        u_ids, i_ids, ratings, u_revs, i_revs, u_rids, i_rids = zip(*batch)
-        
-        u_ids = LongTensor(u_ids)
-        i_ids = LongTensor(i_ids)
-        ratings = FloatTensor(ratings)
-        u_revs = LongTensor(u_revs)
-        i_revs = LongTensor(i_revs)
-        u_rids = LongTensor(u_rids)
-        i_rids = LongTensor(i_rids)
-
-        u_rev_word_masks = get_mask(u_revs)
-        i_rev_word_masks = get_mask(i_revs)
-        u_rev_masks = self.get_rev_mask(u_revs)
-        i_rev_masks = self.get_rev_mask(i_revs)
-
-        return (u_ids, i_ids, ratings), (u_revs, i_revs, u_rev_word_masks, i_rev_word_masks, u_rev_masks, i_rev_masks), (u_rids, i_rids)
-     
-
 
 class NarreDatasetSameUIReviewNum(torch.utils.data.Dataset):
     def __init__(self, args, set_name):
@@ -512,7 +361,7 @@ class NarreDatasetSameUIReviewNum(torch.utils.data.Dataset):
         # for each review(u_text or i_text) [...] 
         # NOTE: not padding 
         if self.set_name == "train":
-            u_id, i_id, rating, u_revs, i_revs, u_rids, i_rids, _, _, ui_rev = self.examples[i]
+            u_id, i_id, rating, u_revs, i_revs, u_rids, i_rids, _ = self.examples[i]
             #print("org: ", u_revs[:4])
             if self.sample_train_review:
                 u_revs = self.uniform_sample_reviews(u_revs, self.u_rv_num)
@@ -601,15 +450,95 @@ class NarreDatasetSameUIReviewNum(torch.utils.data.Dataset):
 
         return (u_ids, i_ids, ratings), (u_revs, i_revs, u_rev_word_masks, i_rev_word_masks, u_rev_masks, i_rev_masks), (u_rids, i_rids)
      
+class NarreDataset(torch.utils.data.Dataset):
+    def __init__(self, args, set_name):
+        super(NarreDataset, self).__init__()
+
+        self.args = args
+        self.set_name = set_name
+        param_path = os.path.join(self.args.data_dir, "meta.pkl")
+        with open(param_path, "rb") as f:
+            para = pickle.load(f)
+
+        self.user_num = para['user_num']
+        self.item_num = para['item_num']
+        self.indexlizer = para['indexlizer']
+        self.rv_num = para["rv_num"]
+        self.rv_len = para["rv_len"]
+        self.u_text = para['user_reviews']
+        self.i_text = para['item_reviews']
+        self.u_rids = para["user_rids"]
+        self.i_rids = para["item_rids"]
+        self.word_vocab = self.indexlizer._vocab
+
+        example_path = os.path.join(self.args.data_dir, f"{set_name}_exmaples.pkl")
+        with open(example_path, "rb") as f:
+            self.examples = pickle.load(f)
+
+
+    def __getitem__(self, i):
+        # for each review(u_text or i_text) [...] 
+        # NOTE: not padding 
+        if self.set_name == "train":
+            u_id, i_id, rating, u_revs, i_revs, u_rids, i_rids, _= self.examples[i]
+
+            return u_id, i_id, rating, u_revs, i_revs, u_rids, i_rids
+
+        else:
+            u_id, i_id, rating, u_revs, i_revs, u_rids, i_rids = self.examples[i]
+            return u_id, i_id, rating, u_revs, i_revs, u_rids, i_rids
+
+    def __len__(self):
+        return len(self.examples)
+
+    @staticmethod
+    def truncate_tokens(tokens, max_seq_len):
+        if len(tokens) > max_seq_len:
+            tokens = tokens[:max_seq_len]
+        return tokens
+
+    @staticmethod
+    def get_rev_mask(inputs):
+        """
+        If rv_len are all 0, then corresponding position in rv_num should be 0
+        Args:
+            inputs: [bz, rv_num, rv_len]
+        """
+        bz, rv_num, _ = list(inputs.size())
+
+        masks = torch.ones(size=(bz, rv_num)).int()
+        inputs = inputs.sum(dim=-1) #[bz, rv_num]
+        masks[inputs==0] = 0 
+
+        return masks.bool()
+
+    def collate_fn(self, batch):
+        u_ids, i_ids, ratings, u_revs, i_revs, u_rids, i_rids = zip(*batch)
+        
+        u_ids = LongTensor(u_ids)
+        i_ids = LongTensor(i_ids)
+        ratings = FloatTensor(ratings)
+        u_revs = LongTensor(u_revs)
+        i_revs = LongTensor(i_revs)
+        u_rids = LongTensor(u_rids)
+        i_rids = LongTensor(i_rids)
+
+        u_rev_word_masks = get_mask(u_revs)
+        i_rev_word_masks = get_mask(i_revs)
+        u_rev_masks = self.get_rev_mask(u_revs)
+        i_rev_masks = self.get_rev_mask(i_revs)
+
+        return u_revs, i_revs, u_rev_word_masks, i_rev_word_masks, u_rev_masks, i_rev_masks, u_ids, i_ids, ratings
+
 
 if __name__ == "__main__":
-    config_file = "./models/siamese/defalut_simple_train.json"
+    config_file = "./models/simple_siamese/defalut_simple_train.json"
     args = parse_args(config_file)
-    train_dataset = NarreDatasetSameUIReviewNum(args, "train")
-    valid_dataset = NarreDatasetSameUIReviewNum(args, "test")
+    train_dataset = NarreDataset(args, "train")
+    valid_dataset = NarreDataset(args, "test")
 
-    train_dataloder = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=train_dataset.train_collate_fn, num_workers=4)
-    valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=valid_dataset.test_collate_fn, num_workers=4)
+    train_dataloder = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=train_dataset.collate_fn, num_workers=4)
+    valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=valid_dataset.collate_fn, num_workers=4)
 
     dataloaders = {"train": train_dataloder, "valid": valid_dataloader, "test": None}
     experiment = NarreExperiment(args, dataloaders)

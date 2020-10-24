@@ -15,10 +15,10 @@ from torch import LongTensor, FloatTensor
 import numpy as np
 from gensim.models import KeyedVectors
 
-from models.narre.narre import NARRE
+from models.dual_att.dual_att import DualAtt
 from experiment import Experiment
 from utils import get_mask
-from preprocess.divide_and_create_example_word import clean_str
+from preprocess.divide_and_create_example_sent import clean_str
 
 class Args(object):
     pass
@@ -71,9 +71,9 @@ class AvgMeters(object):
 class EarlyStop(Exception):
     pass
 
-class NarreExperiment(Experiment):
+class DualAttExperiment(Experiment):
     def __init__(self, args, dataloaders):
-        super(NarreExperiment, self).__init__(args, dataloaders)
+        super(DualAttExperiment, self).__init__(args, dataloaders)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # dataloader
@@ -120,13 +120,13 @@ class NarreExperiment(Experiment):
         else:
             _dataset  = self.train_dataloader.dataset
             word_pretrained=None
-        self.model = NARRE(user_size=_dataset.user_num, item_size=_dataset.item_num, 
-                vocab_size=len(_dataset.word_vocab), kernel_sizes=[3],
-                hidden_dim=150, embedding_dim=self.args.embedding_dim, 
-                att_dim=self.args.att_dim, latent_dim=self.args.latent_dim,
-                max_doc_num=_dataset.rv_num, max_doc_len=_dataset.rv_len, dropout=self.args.dropout, 
-                word_padding_idx=0, user_padding_idx=0, item_padding_idx=0, 
-                pretrained_embeddings=word_pretrained, arch=self.args.arch)
+
+        self.model = DualAtt(vocab_size=len(_dataset.word_vocab), 
+                doc_len=_dataset.doc_len, l_window_size=self.args.l_window_size, l_out_size=self.args.l_out_size, 
+                g_out_size=self.args.g_out_size, emb_size=self.args.emb_size,
+                 hidden_size_1=self.args.hidden_size_1, hidden_size_2=self.args.hidden_size_2, dropout=self.args.dropout, 
+                 pretrained_embeddings=word_pretrained)
+
         if self.args.parallel:
             self.model = torch.nn.DataParallel(self.model)
             self.print_write_to_log("the model is parallel training.")
@@ -148,23 +148,16 @@ class NarreExperiment(Experiment):
         start_time = time.time()
 
         self.model.train()
-        for i, (u_text, i_text, u_rv_masks, i_rv_masks, u_id, i_id, reuid, reiid, label) in enumerate(self.train_dataloader):
+        for i, (u_docs, i_docs, ratings) in enumerate(self.train_dataloader):
             if i == 0 and current_epoch == 0:
-                print("u_text", u_text.shape, "i_text", i_text.shape, "reuid", reuid.shape, "reiid", reiid.shape)
-            u_text = u_text.to(self.device)
-            i_text = i_text.to(self.device)
-            u_rv_masks = u_rv_masks.to(self.device)
-            i_rv_masks = i_rv_masks.to(self.device)
-            u_id = u_id.to(self.device)
-            i_id = i_id.to(self.device)
-            reuid = reuid.to(self.device)
-            reiid = reiid.to(self.device)
-            label = label.to(self.device)
+                print("u_docs", u_docs.shape, "i_docs", i_docs.shape)
+            u_docs = u_docs.to(self.device)
+            i_docs = i_docs.to(self.device)
+            ratings = ratings.to(self.device)
 
             self.optimizer.zero_grad()
-            y_pred, _, _ = self.model(u_text, i_text, u_rv_masks, i_rv_masks, u_id, i_id, reuid, reiid)
-            #y_pred = self.model(u_id, i_id)
-            loss = self.loss_func(y_pred, label)
+            y_pred = self.model(u_docs, i_docs)
+            loss = self.loss_func(y_pred, ratings)
             loss.backward()
 
             gnorm = nn.utils.clip_grad_norm_(self.model.parameters(), self.args.max_grad_norm)
@@ -172,8 +165,8 @@ class NarreExperiment(Experiment):
 
             # val 
             avg_loss.update(loss.mean().item())
-            square_error += loss.mean().item() * label.size(0)
-            accum_count += label.size(0)
+            square_error += loss.mean().item() * ratings.size(0)
+            accum_count += ratings.size(0)
 
             # log
             if (i+1) % self.args.log_idx == 0 and self.args.log:
@@ -197,24 +190,17 @@ class NarreExperiment(Experiment):
         avg_loss = AvgMeters()
 
         self.model.eval()
-        for i, (u_text, i_text, u_rv_masks, i_rv_masks, u_id, i_id, reuid, reiid, label) in enumerate(self.valid_dataloader):
-            u_text = u_text.to(self.device)
-            i_text = i_text.to(self.device)
-            u_rv_masks = u_rv_masks.to(self.device)
-            i_rv_masks = i_rv_masks.to(self.device)
-            u_id = u_id.to(self.device)
-            i_id = i_id.to(self.device)
-            reuid = reuid.to(self.device)
-            reiid = reiid.to(self.device)
-            label = label.to(self.device)
+        for i, (u_docs, i_docs, ratings) in enumerate(self.valid_dataloader):
+            u_docs = u_docs.to(self.device)
+            i_docs = i_docs.to(self.device)
+            ratings = ratings.to(self.device)
 
             with torch.no_grad():
-                y_pred, _, _ = self.model(u_text, i_text, u_rv_masks, i_rv_masks, u_id, i_id, reuid, reiid)
-                #y_pred = self.model(u_id, i_id)
-                loss = self.loss_func(y_pred, label)
+                y_pred = self.model(u_docs, i_docs)
+                loss = self.loss_func(y_pred, ratings)
 
-            square_error += loss.mean().item() * label.size(0)
-            accum_count += label.size(0)
+            square_error += loss.mean().item() * ratings.size(0)
+            accum_count += ratings.size(0)
             avg_loss.update(loss.mean().item())
 
         rmse = math.sqrt(square_error / accum_count)
@@ -251,9 +237,9 @@ class NarreExperiment(Experiment):
             self.train_one_epoch(epoch)
             self.valid_one_epoch()
 
-class NarreDataset(torch.utils.data.Dataset):
+class DualAttDataset(torch.utils.data.Dataset):
     def __init__(self, args, set_name):
-        super(NarreDataset, self).__init__()
+        super(DualAttDataset, self).__init__()
 
         self.args = args
         self.set_name = set_name
@@ -264,12 +250,9 @@ class NarreDataset(torch.utils.data.Dataset):
         self.user_num = para['user_num']
         self.item_num = para['item_num']
         self.indexlizer = para['indexlizer']
-        self.rv_num = para["rv_num"]
-        self.rv_len = para["rv_len"]
-        self.u_text = para['user_reviews']
-        self.i_text = para['item_reviews']
-        self.u_rids = para["user_rids"]
-        self.i_rids = para["item_rids"]
+        self.u_docs = para['user_docs']
+        self.i_docs = para['item_docs']
+        self.doc_len = para["doc_len"]
         self.word_vocab = self.indexlizer._vocab
 
         example_path = os.path.join(self.args.data_dir, f"{set_name}_exmaples.pkl")
@@ -278,66 +261,33 @@ class NarreDataset(torch.utils.data.Dataset):
 
 
     def __getitem__(self, i):
-        # for each review(u_text or i_text) [...] 
+        # for each review(u_docs or i_docs) [...] 
         # NOTE: not padding 
-        if self.set_name == "train":
-            u_id, i_id, rating, u_revs, i_revs, u_rids, i_rids, _= self.examples[i]
+        u_id, i_id, rating, u_doc, i_doc = self.examples[i]
 
-            return u_id, i_id, rating, u_revs, i_revs, u_rids, i_rids
-
-        else:
-            u_id, i_id, rating, u_revs, i_revs, u_rids, i_rids = self.examples[i]
-            return u_id, i_id, rating, u_revs, i_revs, u_rids, i_rids
+        return rating, u_doc, i_doc
 
     def __len__(self):
         return len(self.examples)
 
-    @staticmethod
-    def truncate_tokens(tokens, max_seq_len):
-        if len(tokens) > max_seq_len:
-            tokens = tokens[:max_seq_len]
-        return tokens
-
-    @staticmethod
-    def get_rev_mask(inputs):
-        """
-        If rv_len are all 0, then corresponding position in rv_num should be 0
-        Args:
-            inputs: [bz, rv_num, rv_len]
-        """
-        bz, rv_num, _ = list(inputs.size())
-
-        masks = torch.ones(size=(bz, rv_num)).int()
-        inputs = inputs.sum(dim=-1) #[bz, rv_num]
-        masks[inputs==0] = 0 
-
-        return masks.bool()
-
     def collate_fn(self, batch):
-        u_ids, i_ids, ratings, u_revs, i_revs, u_rids, i_rids = zip(*batch)
+        ratings, u_docs, i_docs = zip(*batch)
         
-        u_ids = LongTensor(u_ids)
-        i_ids = LongTensor(i_ids)
         ratings = FloatTensor(ratings)
-        u_revs = LongTensor(u_revs)
-        i_revs = LongTensor(i_revs)
-        u_rids = LongTensor(u_rids)
-        i_rids = LongTensor(i_rids)
+        u_docs = LongTensor(u_docs)
+        i_docs= LongTensor(i_docs)
 
-        u_rev_word_masks = get_mask(u_revs)
-        i_rev_word_masks = get_mask(i_revs)
-
-        return u_revs, i_revs, u_rev_word_masks, i_rev_word_masks, u_ids, i_ids, u_rids, i_rids, ratings
+        return u_docs, i_docs, ratings
 
 if __name__ == "__main__":
-    config_file = "./models/narre/default_narre.json"
+    config_file = "./models/dual_att/default_dual_att.json"
     args = parse_args(config_file)
-    train_dataset = NarreDataset(args, "train")
-    valid_dataset = NarreDataset(args, "valid")
+    train_dataset = DualAttDataset(args, "train")
+    valid_dataset = DualAttDataset(args, "valid")
 
     train_dataloder = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=train_dataset.collate_fn, num_workers=8)
     valid_dataloader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, collate_fn=valid_dataset.collate_fn, num_workers=8)
 
     dataloaders = {"train": train_dataloder, "valid": valid_dataloader, "test": None}
-    experiment = NarreExperiment(args, dataloaders)
+    experiment = DualAttExperiment(args, dataloaders)
     experiment.train()

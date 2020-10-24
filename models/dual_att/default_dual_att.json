@@ -1,0 +1,30 @@
+{
+    "data_dir": "datasets/Toys_and_Games_5/doc_split",
+    "dataset": "Toys_and_Games_tmp",
+    "log_dir": "logs",
+    "log": true,
+    "log_idx": 500,
+    "pretrained_path": -1,
+    "model_name": "Dual_ATT",
+    "verbose": false,
+    "stats": false,
+    "stats_idx": 2,
+    "parallel": false,
+
+    "l_window_size": 5, 
+    "l_out_size": 200, 
+    "g_out_size": 100, 
+    "emb_size": 100,
+    "hidden_size_1": 500, 
+    "hidden_size_2": 50, 
+    "dropout": 0.5,
+    "use_pretrain": false,
+
+    "epochs": 64,
+    "batch_size": 50,
+    "lr": 0.002,
+    "lr_decay": 0.5,
+    "decay_patience": 0,
+    "max_grad_norm": 5.0,
+    "patience": 5
+}
